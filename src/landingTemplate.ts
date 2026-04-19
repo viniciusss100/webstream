@@ -271,7 +271,7 @@ export function landingTemplate(manifest: CustomManifest) {
       <div class="separator"></div>
 
       <p>
-        The source code can be found on <a href="https://github.com/newman2x/WebStreamrMBG" target="_blank">GitHub</a>.
+        The source code can be found on <a href="${require('../package.json').repository.url.replace(/\.git$/, '')}" target="_blank">GitHub</a>.
       </p>
 
       <div class="separator"></div>
