@@ -49,6 +49,7 @@ export const buildManifest = (sources: Source[], extractors: Extractor[], config
       .forEach(countryCode => countryCodeSources[countryCode] = [...(countryCodeSources[countryCode] ?? []), source]));
 
   const sortedLanguageSources = typedEntries(countryCodeSources)
+    .filter(([countryCode]) => countryCode === CountryCode.pt)
     .sort(([countryCodeA], [countryCodeB]) => {
       if (countryCodeB === CountryCode.multi) {
         return 1;
@@ -66,7 +67,7 @@ export const buildManifest = (sources: Source[], extractors: Extractor[], config
       key: countryCode,
       type: 'checkbox',
       title: `${language} ${flagFromCountryCode(countryCode)} (${(sources as Source[]).map(source => source.label).sort().join(', ')})`,
-      ...(countryCode in config && { default: 'checked' }),
+      default: 'checked',
     });
   }
 
