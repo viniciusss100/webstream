@@ -19,4 +19,13 @@ export const envIsProd = (): boolean => process.env['NODE_ENV'] === 'production'
 
 export const envIsTest = (): boolean => process.env['NODE_ENV'] === 'test';
 
+export const envGetAppVersion = (): string => {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require('../../package.json').version;
+  } catch {
+    return '0.0.0';
+  }
+};
+
 export const isElfHostedInstance = (req: Request): boolean => req.host.endsWith('elfhosted.com');
