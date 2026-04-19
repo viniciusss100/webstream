@@ -1,6 +1,6 @@
 import { ContentType } from 'stremio-addon-sdk';
 import { Context, CountryCode } from '../types';
-import { Fetcher, Id } from '../utils';
+import { Fetcher, Id, TmdbId, unpackEval } from '../utils';
 import { resolveTmdbId } from './tmdb-helper';
 import { Source, SourceResult } from './Source';
 
@@ -40,100 +40,90 @@ export class FSHD extends Source {
     const tmdbId = await resolveTmdbId(ctx, this.fetcher, id);
     const serieUrl = new URL(`/serie/${tmdbId.id}/${tmdbId.season}/${tmdbId.episode}`, BASE_URL);
 
-    const html = await this.fetcher.text(ctx, serieUrl, { headers: HEADERS });
-
-    const activeMatch = html.match(/class="episodeOption active"\s+data-contentid="(\d+)"/);
-    const seasonRegex = new RegExp(
-      `data-season="${tmdbId.season}"[\\s\\S]*?data-contentid="(\\d+)"`,
-      'i',
-    );
-    const contentId = activeMatch?.[1] ?? html.match(seasonRegex)?.[1];
+    const contentId = await this.fetchContentId(ctx, serieUrl, tmdbId);
     if (!contentId) return [];
 
-    const ajaxHeaders = {
-      ...HEADERS,
-      'Accept': 'application/json',
-      'Content-Type': 'application/json',
-      'Referer': serieUrl.href,
-    };
-
-    const optionsResp = await this.fetcher.json(ctx, new URL(OPTIONS_API), {
-      method: 'POST',
-      headers: ajaxHeaders,
-      data: { content_id: parseInt(contentId), content_type: 2 },
-    });
-
-    const serverIds: string[] = [];
-    const regex = /["']ID["']\s*:\s*(\d+)/g;
-    const optionsText = JSON.stringify(optionsResp);
-    let match: RegExpExecArray | null;
-    while ((match = regex.exec(optionsText)) !== null) {
-      if (match[1]) serverIds.push(match[1]);
-    }
-
+    const serverIds = await this.fetchServerIds(ctx, serieUrl, contentId);
     if (!serverIds.length) return [];
 
     const results: SourceResult[] = [];
-
-    await Promise.all(serverIds.map(async (videoId) => {
-      try {
-        const playerResp = await this.fetcher.json(ctx, new URL(PLAYER_API), {
-          method: 'POST',
-          headers: ajaxHeaders,
-          data: { content_info: parseInt(contentId), content_type: 2, video_id: parseInt(videoId) },
-        });
-
-        const playerText = JSON.stringify(playerResp);
-        const urlMatch = playerText.match(/["']video_url["']\s*:\s*["'](.*?)["']/);
-        const playerUrl = urlMatch?.[1]?.replace(/\\/g, '');
-        if (!playerUrl) return;
-
-        const playerPage = await this.fetcher.text(ctx, new URL(playerUrl), { headers: { Referer: serieUrl.href } });
-        const finalMatch = playerPage.match(/window\.location\.href\s*=\s*"([^"]+)"/);
-        if (!finalMatch?.[1]) return;
-
-        const embedUrl = finalMatch[1];
-        const embedPage = await this.fetcher.text(ctx, new URL(embedUrl), {
-          headers: { Referer: playerUrl, 'User-Agent': HEADERS['User-Agent'] },
-        });
-
-        // Extract stream URL from obfuscated JWPlayer setup
-        // The data hash is in the URL: ?data=HASH
-        const dataHash = new URL(embedUrl).searchParams.get('data');
-        if (!dataHash) return;
-
-        // Deobfuscate: find the k array and reconstruct videoUrl
-        const fullMatch = embedPage.match(/eval\(function\(p,a,c,k,e,d\)\{.*?\}\('(.*?)',(\d+),(\d+),'([^']+)'\.split/s);
-        if (!fullMatch?.[1] || !fullMatch[2] || !fullMatch[3] || !fullMatch[4]) return;
-
-        const packed = fullMatch[1];
-        const aNum = parseInt(fullMatch[2]);
-        const keyArr = fullMatch[4].split('|');
-        const decode = (c: number): string => (c < aNum ? '' : decode(Math.floor(c / aNum))) + ((c = c % aNum) > 35 ? String.fromCharCode(c + 29) : c.toString(36));
-        let deobf = packed;
-        let ci = parseInt(fullMatch[3]);
-        while (ci--) { if (keyArr[ci]) deobf = deobf.replace(new RegExp(`\\b${decode(ci)}\\b`, 'g'), keyArr[ci] as string); }
-
-        const hostListMatch = deobf.match(/"hostList"\s*:\s*\{"1"\s*:\s*\["([^"]+)"\]/);
-        const videoUrlMatch = deobf.match(/"videoUrl"\s*:\s*"([^"]+)"/);
-        if (!hostListMatch?.[1] || !videoUrlMatch?.[1]) return;
-
-        const host = hostListMatch[1];
-        const videoPath = videoUrlMatch[1].replace(/\\\//g, '/');
-        const streamUrl = `https://${host}${videoPath}`;
-
-        results.push({
-          url: new URL(streamUrl),
-          meta: {
-            countryCodes: [CountryCode.pt],
-            referer: embedUrl,
-          },
-        });
-      } catch {
-        // ignore individual player failures
+    await Promise.all(serverIds.map(async (serverId) => {
+      const streamUrl = await this.fetchStreamUrl(ctx, serieUrl, contentId, serverId);
+      if (streamUrl) {
+        results.push(streamUrl);
       }
     }));
 
     return results;
+  }
+
+  private async fetchContentId(ctx: Context, serieUrl: URL, tmdbId: TmdbId): Promise<number | undefined> {
+    const html = await this.fetcher.text(ctx, serieUrl, { headers: HEADERS });
+
+    const activeMatch = html.match(/class="episodeOption active"\s+data-contentid="(\d+)"/);
+    if (activeMatch?.[1]) return parseInt(activeMatch[1]);
+
+    const seasonRegex = new RegExp(`data-season="${tmdbId.season}"[\\s\\S]*?data-contentid="(\\d+)"`, 'i');
+    const contentIdMatch = html.match(seasonRegex);
+    return contentIdMatch?.[1] ? parseInt(contentIdMatch[1]) : undefined;
+  }
+
+  private async fetchServerIds(ctx: Context, serieUrl: URL, contentId: number): Promise<string[]> {
+    const ajaxHeaders = { ...HEADERS, 'Accept': 'application/json', 'Content-Type': 'application/json', 'Referer': serieUrl.href };
+
+    try {
+      const optionsResp = await this.fetcher.json(ctx, new URL(OPTIONS_API), {
+        method: 'POST',
+        headers: ajaxHeaders,
+        data: { content_id: contentId, content_type: 2 },
+      });
+
+      const serverIds: string[] = [];
+      const regex = /["']ID["']\s*:\s*(\d+)/g;
+      const optionsText = JSON.stringify(optionsResp);
+      let match: RegExpExecArray | null;
+      while ((match = regex.exec(optionsText)) !== null) {
+        if (match[1]) serverIds.push(match[1]);
+      }
+      return serverIds;
+    } catch {
+      return [];
+    }
+  }
+
+  private async fetchStreamUrl(ctx: Context, serieUrl: URL, contentId: number, serverId: string): Promise<SourceResult | undefined> {
+    const ajaxHeaders = { ...HEADERS, 'Accept': 'application/json', 'Content-Type': 'application/json', 'Referer': serieUrl.href };
+
+    try {
+      const playerResp = await this.fetcher.json(ctx, new URL(PLAYER_API), {
+        method: 'POST',
+        headers: ajaxHeaders,
+        data: { content_info: contentId, content_type: 2, video_id: parseInt(serverId) },
+      });
+
+      const playerUrl = (JSON.stringify(playerResp).match(/["']video_url["']\s*:\s*["'](.*?)["']/) as string[])?.[1]?.replace(/\\/g, '');
+      if (!playerUrl) return;
+
+      const playerPage = await this.fetcher.text(ctx, new URL(playerUrl), { headers: { Referer: serieUrl.href } });
+      const finalMatch = playerPage.match(/window\.location\.href\s*=\s*"([^"]+)"/);
+      if (!finalMatch?.[1]) return;
+
+      const embedUrl = finalMatch[1];
+      const embedPage = await this.fetcher.text(ctx, new URL(embedUrl), {
+        headers: { Referer: playerUrl, 'User-Agent': HEADERS['User-Agent'] },
+      });
+
+      const deobf = unpackEval(embedPage);
+      const hostListMatch = deobf.match(/"hostList"\s*:\s*\{"1"\s*:\s*\["([^"]+)"\]/);
+      const videoUrlMatch = deobf.match(/"videoUrl"\s*:\s*"([^"]+)"/);
+      if (!hostListMatch?.[1] || !videoUrlMatch?.[1]) return;
+
+      return {
+        url: new URL(`https://${hostListMatch[1]}${videoUrlMatch[1].replace(/\\\//g, '/')}`),
+        meta: { countryCodes: [CountryCode.pt], referer: embedUrl },
+      };
+    } catch {
+      return undefined;
+    }
   }
 }
