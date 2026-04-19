@@ -67,10 +67,7 @@ if (envGet('CACHE_FILES_DELETE_ON_START')) {
   })();
 }
 
-addon.use((req: Request, res: Response, next: NextFunction) => {
-  process.env['HOST'] = req.host;
-  process.env['PROTOCOL'] = req.protocol;
-
+addon.use((_req: Request, res: Response, next: NextFunction) => {
   res.setHeader('X-Request-ID', randomUUID());
 
   res.setHeader('Access-Control-Allow-Origin', '*');
