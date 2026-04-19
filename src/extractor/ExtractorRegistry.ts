@@ -1,7 +1,7 @@
 import { Cacheable, CacheableMemory, Keyv } from 'cacheable';
 import winston from 'winston';
 import { Context, Format, Meta, UrlResult } from '../types';
-import { createKeyvSqlite, envGet, isExtractorDisabled } from '../utils';
+import { createKeyvSqlite, isExtractorDisabled } from '../utils';
 import { Extractor } from './Extractor';
 
 export class ExtractorRegistry {
@@ -66,7 +66,8 @@ export class ExtractorRegistry {
     ) {
       // generate lazy extract urls
       return lazyUrlResults.map((urlResult, index) => {
-        const extractUrl = new URL(`${envGet('PROTOCOL')}:${envGet('HOST')}/extract/`);
+        const extractUrl = new URL(ctx.hostUrl.href);
+        extractUrl.pathname = '/extract/';
 
         extractUrl.searchParams.set('index', `${index}`);
         extractUrl.searchParams.set('url', url.href);
