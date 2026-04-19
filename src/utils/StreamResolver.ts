@@ -149,7 +149,7 @@ export class StreamResolver {
           index === self.findIndex(t => t.url.href === urlResult.url.href),
         )
         .map(urlResult => ({
-          ...this.buildUrl(urlResult),
+          ...this.buildUrl(ctx, urlResult),
           name: this.buildName(ctx, urlResult),
           title: this.buildTitle(ctx, urlResult),
           behaviorHints: {
@@ -184,17 +184,27 @@ export class StreamResolver {
     return Math.min(...urlResults.map(urlResult => urlResult.ttl as number));
   };
 
-  private buildUrl(urlResult: UrlResult): { externalUrl: string } | { url: string } | { ytId: string } {
+  private buildUrl(ctx: Context, urlResult: UrlResult): { externalUrl: string } | { url: string } | { ytId: string } {
     /* istanbul ignore if */
     if (urlResult.ytId) {
       return { ytId: urlResult.ytId };
     }
 
-    if (!urlResult.isExternal) {
-      return { url: urlResult.url.href };
+    if (urlResult.isExternal) {
+      return { externalUrl: urlResult.url.href };
     }
 
-    return { externalUrl: urlResult.url.href };
+    // Native Proxy: Route everything through /stream-proxy
+    const proxyUrl = new URL(ctx.hostUrl.href);
+    proxyUrl.pathname = '/stream-proxy';
+    proxyUrl.searchParams.set('url', urlResult.url.href);
+    
+    const referer = urlResult.meta?.referer || urlResult.requestHeaders?.['Referer'] || urlResult.requestHeaders?.['referer'];
+    if (referer) {
+      proxyUrl.searchParams.set('referer', referer);
+    }
+
+    return { url: proxyUrl.href };
   };
 
   private buildName(ctx: Context, urlResult: UrlResult): string {
