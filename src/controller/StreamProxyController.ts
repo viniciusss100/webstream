@@ -29,16 +29,23 @@ export class StreamProxyController {
         const { data } = await axios.get<string>(url, { headers, responseType: 'text', transformResponse: [d => d] });
         const proxyBase = `${req.protocol}://${req.host}/stream-proxy`;
         const refParam = referer ? `&referer=${encodeURIComponent(referer)}` : '';
+        
+        // Ensure the rewritten URLs in the M3U8 also point back to our proxy
         const rewritten = data
           .replace(/^(https?:\/\/[^\s]+)$/gm, (m) => `${proxyBase}?url=${encodeURIComponent(m)}${refParam}`)
           .replace(/URI="(https?:\/\/[^"]+)"/g, (_, u) => `URI="${proxyBase}?url=${encodeURIComponent(u)}${refParam}"`);
+        
         res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
         res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', '*');
         res.send(rewritten);
       } else {
         const response = await axios.get(url, { headers, responseType: 'stream' });
         res.setHeader('Content-Type', response.headers['content-type'] ?? 'video/mp2t');
         res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', '*');
         response.data.pipe(res);
       }
     } catch {
