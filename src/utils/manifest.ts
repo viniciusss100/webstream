@@ -7,7 +7,7 @@ import {
   isExtractorDisabled,
   isResolutionExcluded,
 } from './config';
-import { envGetAppId, envGetAppName } from './env';
+import { envGetAppId, envGetAppName, envGetAppVersion } from './env';
 import { flagFromCountryCode, languageFromCountryCode } from './language';
 import { RESOLUTIONS } from './resolution';
 
@@ -16,7 +16,7 @@ const typedEntries = <T extends object>(obj: T): [keyof T, T[keyof T]][] => (Obj
 export const buildManifest = (sources: Source[], extractors: Extractor[], config: Config): CustomManifest => {
   const manifest: CustomManifest = {
     id: envGetAppId(),
-    version: '0.69.1', // x-release-please-version
+    version: envGetAppVersion(),
     name: envGetAppName(),
     description: 'Provides HTTP URLs from streaming websites. Configure add-on for additional languages. Add MediaFlow proxy for more URLs.',
     resources: [
